@@ -7,11 +7,11 @@ import java.util.ArrayList;
 
 /**
  * @author Linwei
+ *
  * ´Ê·¨·ÖÎöÆ÷
  */
 public class LexicalAnalyse {
 
-	public static final int MAX_SIZE = 50;
 	public static final char END = '#';
 
 	private ArrayList<Word> mWordList = new ArrayList<>();

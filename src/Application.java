@@ -1,6 +1,12 @@
 import java.io.IOException;
 import java.util.ArrayList;
 
+/**
+ * Ö÷³ÌÐò
+ *
+ * @author Linwei
+ *
+ */
 public class Application {
 
 	public static void main(String[] args) {

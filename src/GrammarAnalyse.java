@@ -1,7 +1,4 @@
-import org.omg.PortableInterceptor.SYSTEM_EXCEPTION;
-
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.*;
 
 /**
  * 递归下降语法分析器
@@ -14,15 +11,33 @@ public class GrammarAnalyse {
     private int mIndex;
     private Word mSym = null;
 
-    private HashMap<String, Integer> mIDTable = new HashMap<>();
-    private ArrayList<Form> mForms = new ArrayList<>();
+    // 符号表，ID->入口地址
+    private HashMap<String,Integer> mIDTable = new HashMap<>();
+    private int mIDIndex;
 
-    private int mTcount;
+    // 整数常量表，NUM->入口地址
+    private HashMap<String,Integer> mIntTable = new HashMap<>();
+    private int mIntIndex;
+
+    // 四元式列表
+    private ArrayList<Form> mForms = new ArrayList<>();
+    // 四元式行号
+    private int mFormLine;
+
+    // 回调拉链栈
+    private Deque<Form> mFormQueue = new ArrayDeque<>();
+
+
+    // 临时变量计数
+    private int mTCount;
 
     public GrammarAnalyse(ArrayList<Word> list) {
         this.mWords = list;
         mIndex = 0;
-        mTcount = 1;
+        mIDIndex = 0;
+        mIntIndex = 0;
+        mFormLine = 0;
+        mTCount = 1;
     }
 
     public void analyse() {
@@ -31,7 +46,7 @@ public class GrammarAnalyse {
         System.out.println("OK!");
     }
 
-    public ArrayList<Form> getForms(){
+    public ArrayList<Form> getForms() {
         return this.mForms;
     }
 
@@ -71,7 +86,9 @@ public class GrammarAnalyse {
                 error("missing ( before" + mSym.value);
             }
             mSym = getSym();
-            B();
+            String express = B();
+            emit("jnz",express,"","-1",mFormLine++);
+            emit("j","","","-1",mFormLine++);
             if (!symEqual(")")) {
                 error("missing ) after" + mSym.value);
             }
@@ -79,8 +96,10 @@ public class GrammarAnalyse {
             if (!symEqual("then")) {
                 error("missing then after" + mSym.value);
             }
+            mFormQueue.removeFirst().result = String.valueOf(mFormLine); // jnz
             mSym = getSym();
             S();
+            mFormQueue.removeFirst().result = String.valueOf(mFormLine); // j
             if (symEqual("else")) {
                 mSym = getSym();
                 S();
@@ -91,7 +110,10 @@ public class GrammarAnalyse {
                 error("missing ( before" + mSym.value);
             }
             mSym = getSym();
-            B();
+            String express = B();
+            int loopEnter = mFormLine;
+            emit("jnz",express,"","-1",mFormLine++);
+            emit("j","","","-1",mFormLine++);
             if (!symEqual(")")) {
                 error("missing ) after" + mSym.value);
             }
@@ -100,8 +122,11 @@ public class GrammarAnalyse {
             if (!symEqual("do")) {
                 error("missing then after" + mSym.value);
             }
+            mFormQueue.removeFirst().result = String.valueOf(mFormLine); // jnz
             mSym = getSym();
             S();
+            emit("j", "", "", String.valueOf(loopEnter), mFormLine++);
+            mFormQueue.removeFirst().result = String.valueOf(mFormLine); // j
         } else if (symEqual("{")) { //{ L }
             mSym = getSym();
             L();
@@ -110,14 +135,14 @@ public class GrammarAnalyse {
             }
             mSym = getSym();
         } else if (mSym.sign.equals("ID")) { //ID=E
-            lookup(mSym.value);
+            int p = lookup(mSym.value);
             String id = mSym.value;
             mSym = getSym();
             if (!symEqual("=")) {
                 error("missing = before " + mSym.value);
             }
             mSym = getSym();
-            emit("=", E(), "", id);
+            emit("=", E(), "", id, mFormLine++);
         } else {
             error("error in S");
         }
@@ -159,15 +184,17 @@ public class GrammarAnalyse {
     }
 
     // B→T’ {|T’}
-    private void B() {
+    private String B() {
+        String express = "";
         if (firstTT()) {
-            TT();
+            express += TT();
             if (symEqual("|")) {
-                TT();
+                express += TT();
             }
         } else {
             error("can't match first TT");
         }
+        return express;
     }
 
     private boolean firstTT() {
@@ -175,15 +202,17 @@ public class GrammarAnalyse {
     }
 
     // T’ →F’ {&F’ }
-    private void TT() {
+    private String TT() {
+        String express = "";
         if (firstFF()) {
-            FF();
+            express += FF();
             if (symEqual("&")) {
-                FF();
+                express += FF();
             }
         } else {
             error("can't match first FF");
         }
+        return express;
     }
 
     private boolean firstFF() {
@@ -198,7 +227,7 @@ public class GrammarAnalyse {
         }
         express += mSym.value;
         mSym = getSym();
-        if(mSym.sign.equals("relop")){
+        if (mSym.sign.equals("relop")) {
             express += mSym.value;
             mSym = getSym();
             if (!mSym.sign.equals("ID")) {
@@ -222,9 +251,9 @@ public class GrammarAnalyse {
                 operate = mSym.value;
                 mSym = getSym();
                 t2 = T();
-                result = "t" + (mTcount++);
-                emit(operate, t1, t2, result);
-            }else{
+                result = newtemp();
+                emit(operate, t1, t2, result, mFormLine++);
+            } else {
                 result = t1;
             }
         } else {
@@ -249,9 +278,9 @@ public class GrammarAnalyse {
                 operate = mSym.value;
                 mSym = getSym();
                 t2 = F();
-                result = "t" + (mTcount++);
-                emit(operate, t1, t2, result);
-            }else{
+                result = newtemp();
+                emit(operate, t1, t2, result, mFormLine++);
+            } else {
                 result = t1;
             }
         } else {
@@ -274,9 +303,10 @@ public class GrammarAnalyse {
                 error("missing ) after " + mSym.value);
             }
         } else if (mSym.sign.equals("ID")) {
-            lookup(mSym.value);
+            int p = lookup(mSym.value);
             result = mSym.value;
         } else if (mSym.sign.equals("NUM")) {
+            int pint = lookupint(mSym.value);
             result = mSym.value;
         } else {
             error("error in F");
@@ -293,38 +323,46 @@ public class GrammarAnalyse {
         Word sym = null;
         if (mIndex < mWords.size()) {
             sym = mWords.get(mIndex++);
-            System.out.println(sym.value);
-        }else{
-            System.out.println("###");
+//            System.out.println(sym.value);
         }
         return sym;
     }
 
     private void error(String msg) {
-        System.out.println(String.format("Error:%s at %s position [%d,%d]",msg,mSym.value,
+        System.out.println(String.format("Error:%s at %s position [%d,%d]", msg, mSym.value,
                 mSym.pos.y, mSym.pos.x));
         System.exit(-1);
     }
 
     private void insert(String id) {
-        mIDTable.put(id, null);
+        mIDTable.put(id, mIDIndex++);
     }
 
     // 在符号表中查找标示符
-    private void lookup(String id) {
+    private int lookup(String id) {
         if (!mIDTable.containsKey(id)) {
             error("标示符不存在:" + id);
         }
-    }
-
-    private int lookupint(String id) {
         return mIDTable.get(id);
     }
 
-    private void emit(String operate, String op1, String op2, String result) {
-        Form form = new Form(operate, op1, op2, result);
-        System.out.println(form.toString());
+    private int lookupint(String num) {
+        if(!mIntTable.containsKey(num)){
+            mIntTable.put(num, mIntIndex++);
+        }
+        return mIntTable.get(num);
+    }
+
+    private void emit(String operate, String op1, String op2, String result, int line) {
+        Form form = new Form(operate, op1, op2, result, line);
+        if(form.operate.equals("jnz") || form.operate.equals("j")){
+            mFormQueue.addLast(form);
+        }
         mForms.add(form);
+    }
+
+    private String newtemp(){
+        return "t" + (mTCount++);
     }
 
 }
